@@ -1,0 +1,33 @@
+# Demonstrates template reuse — the same build-and-test template
+# is included twice with different parameters.
+name: Template Pipeline
+
+stages:
+  - stage: Build
+    displayName: Build All Projects
+    jobs:
+      - job: BuildAPI
+        displayName: Build API
+        steps:
+          - template: templates/build-and-test.yaml
+            parameters:
+              project: API
+              configuration: Release
+
+      - job: BuildWeb
+        displayName: Build Web App
+        steps:
+          - template: templates/build-and-test.yaml
+            parameters:
+              project: WebApp
+              configuration: Debug
+
+  - stage: Package
+    dependsOn: Build
+    jobs:
+      - job: CreateArtifacts
+        steps:
+          - pwsh: |
+              Write-Host "Packaging all build outputs..."
+              Write-Host "Artifacts created."
+            displayName: Package Artifacts

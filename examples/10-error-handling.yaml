@@ -1,0 +1,37 @@
+# Demonstrates retry, timeout, and continueOnError for resilient pipelines.
+name: Error Handling
+
+steps:
+  # This step will fail but the pipeline continues
+  - pwsh: |
+      Write-Host "Attempting flaky operation..."
+      exit 1
+    displayName: Flaky Step (continues on error)
+    continueOnError: true
+
+  # This step retries up to 2 times on failure
+  - pwsh: |
+      Write-Host "Attempting operation (may need retries)..."
+      # Simulates eventual success
+      Write-Host "Operation succeeded."
+    displayName: Retry Step
+    retryCountOnTaskFailure: 2
+
+  # This step has a timeout
+  - pwsh: |
+      Write-Host "Quick operation with timeout guard..."
+      Write-Host "Done."
+    displayName: Timed Step
+    timeoutInMinutes: 1
+
+  # This step runs even if previous steps failed
+  - pwsh: |
+      Write-Host "Cleanup always runs."
+    displayName: Cleanup
+    condition: always()
+
+  # This step only runs if everything succeeded
+  - pwsh: |
+      Write-Host "All steps completed successfully!"
+    displayName: Success Summary
+    condition: succeeded()

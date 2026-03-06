@@ -1,0 +1,143 @@
+# A production-style CI/CD pipeline combining multiple features:
+# parameters, variables, multi-stage, conditions, matrix, and deployment.
+name: Full CI/CD Pipeline
+
+parameters:
+  - name: environment
+    type: string
+    default: staging
+    values: [dev, staging, prod]
+
+  - name: nodeVersion
+    type: string
+    default: "20"
+
+variables:
+  - name: appName
+    value: myapp
+  - name: buildConfig
+    value: Release
+
+stages:
+  # ── Stage 1: Build ──────────────────────────────────────────────
+  - stage: Build
+    displayName: Build & Package
+    jobs:
+      - job: BuildApp
+        steps:
+          - pwsh: |
+              Write-Host "Installing dependencies..."
+              Write-Host "Using Node.js v${{ parameters.nodeVersion }}"
+            displayName: Install Dependencies
+
+          - pwsh: |
+              Write-Host "Building $env:APPNAME in $env:BUILDCONFIG mode..."
+              Write-Host "##pipeline[setvariable variable=buildNumber;isOutput=true]$env:PIPELINE_RUNID"
+              Write-Host "Build complete."
+            displayName: Build
+            name: buildStep
+
+          - pwsh: |
+              Write-Host "Creating deployment package..."
+              Write-Host "Package: $env:APPNAME-$env:BUILDCONFIG.tar.gz"
+            displayName: Package Artifacts
+
+  # ── Stage 2: Test ────────────────────────────────────────────────
+  - stage: Test
+    displayName: Quality Gates
+    dependsOn: Build
+    jobs:
+      - job: UnitTests
+        displayName: Unit Tests
+        steps:
+          - pwsh: |
+              Write-Host "Running unit tests..."
+              Write-Host "Coverage: 87.3%"
+              Write-Host "128 passed, 0 failed"
+            displayName: Run Unit Tests
+
+      - job: LintAndFormat
+        displayName: Lint & Format Check
+        steps:
+          - pwsh: |
+              Write-Host "Running linter..."
+              Write-Host "0 errors, 0 warnings"
+            displayName: Lint Check
+
+          - pwsh: |
+              Write-Host "Checking code formatting..."
+              Write-Host "All files formatted correctly."
+            displayName: Format Check
+
+      - job: SecurityScan
+        displayName: Security Scan
+        condition: eq('${{ parameters.environment }}', 'prod')
+        steps:
+          - pwsh: |
+              Write-Host "Running dependency audit..."
+              Write-Host "No vulnerabilities found."
+            displayName: Dependency Audit
+
+          - pwsh: |
+              Write-Host "Running SAST scan..."
+              Write-Host "Scan complete. 0 findings."
+            displayName: SAST Scan
+
+  # ── Stage 3: Deploy ──────────────────────────────────────────────
+  - stage: Deploy
+    displayName: Deploy to ${{ parameters.environment }}
+    dependsOn:
+      - Build
+      - Test
+    jobs:
+      - deployment: DeployApp
+        displayName: Deploy
+        environment: ${{ parameters.environment }}
+        strategy:
+          runOnce:
+            preDeploy:
+              steps:
+                - pwsh: |
+                    Write-Host "Validating ${{ parameters.environment }} environment..."
+                    Write-Host "Environment ready."
+                  displayName: Validate Environment
+
+            deploy:
+              steps:
+                - pwsh: |
+                    Write-Host "Deploying $env:APPNAME to ${{ parameters.environment }}..."
+                    Write-Host "Deployment successful."
+                  displayName: Deploy Application
+
+            postRouteTraffic:
+              steps:
+                - pwsh: |
+                    Write-Host "Running smoke tests on ${{ parameters.environment }}..."
+                    Write-Host "All health checks passed."
+                  displayName: Smoke Tests
+
+            on:
+              success:
+                steps:
+                  - pwsh: Write-Host "$env:APPNAME deployed to ${{ parameters.environment }} successfully!"
+                    displayName: Success
+              failure:
+                steps:
+                  - pwsh: Write-Host "Deployment failed! Initiating rollback..."
+                    displayName: Rollback
+
+  # ── Stage 4: Notify ──────────────────────────────────────────────
+  - stage: Notify
+    displayName: Notifications
+    dependsOn: Deploy
+    condition: always()
+    jobs:
+      - job: SendNotifications
+        steps:
+          - pwsh: |
+              Write-Host "Pipeline: $env:PIPELINE_NAME"
+              Write-Host "Run ID: $env:PIPELINE_RUNID"
+              Write-Host "Environment: ${{ parameters.environment }}"
+              Write-Host "Notification sent."
+            displayName: Notify Team
+            condition: always()

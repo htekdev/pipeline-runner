@@ -1,0 +1,6 @@
+# The simplest possible pipeline — one step, no wrapping needed.
+name: Hello World
+
+steps:
+  - pwsh: Write-Host "Hello from piperun!"
+    displayName: Say Hello

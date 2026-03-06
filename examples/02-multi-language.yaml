@@ -1,0 +1,18 @@
+# Demonstrates all three supported step languages.
+name: Multi-Language Steps
+
+steps:
+  - pwsh: |
+      $greeting = "Hello from PowerShell"
+      Write-Host "$greeting on $($PSVersionTable.OS)"
+    displayName: PowerShell Step
+
+  - node: |
+      const os = require('os');
+      console.log(`Hello from Node.js ${process.version} on ${os.platform()}`);
+    displayName: Node.js Step
+
+  - python: |
+      import platform
+      print(f"Hello from Python {platform.python_version()} on {platform.system()}")
+    displayName: Python Step

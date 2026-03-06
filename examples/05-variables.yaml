@@ -1,0 +1,49 @@
+# Demonstrates inline variables, scoped variables, and passing output
+# variables between steps using the ##pipeline logging protocol.
+name: Variables and Outputs
+
+variables:
+  - name: globalMessage
+    value: "Hello from pipeline-level variables"
+  - name: buildConfig
+    value: Release
+
+stages:
+  - stage: Build
+    variables:
+      - name: stageVar
+        value: "I'm scoped to the Build stage"
+    jobs:
+      - job: Compile
+        variables:
+          - name: jobVar
+            value: "I'm scoped to the Compile job"
+        steps:
+          - pwsh: |
+              Write-Host "Global: $env:GLOBALMESSAGE"
+              Write-Host "Stage: $env:STAGEVAR"
+              Write-Host "Job: $env:JOBVAR"
+              Write-Host "Config: $env:BUILDCONFIG"
+            displayName: Read Variables
+
+          - pwsh: |
+              # Set an output variable for other steps to consume
+              Write-Host "##pipeline[setvariable variable=buildId;isOutput=true]build-42"
+              Write-Host "##pipeline[setvariable variable=artifactPath]dist/app.zip"
+              Write-Host "Build ID generated."
+            displayName: Generate Build ID
+            name: buildStep
+
+          - pwsh: |
+              Write-Host "Using artifact path: $env:ARTIFACTPATH"
+            displayName: Use Output Variable
+
+  - stage: Report
+    dependsOn: Build
+    jobs:
+      - job: Summary
+        steps:
+          - pwsh: |
+              Write-Host "Build config was: $env:BUILDCONFIG"
+              Write-Host "Pipeline complete!"
+            displayName: Print Summary

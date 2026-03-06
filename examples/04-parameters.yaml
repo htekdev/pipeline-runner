@@ -1,0 +1,55 @@
+# Typed parameters with defaults and allowed values.
+# Override from CLI: piperun run examples/04-parameters.yaml --param.environment=prod --param.version=2.0.0
+name: Parameterized Pipeline
+
+parameters:
+  - name: environment
+    type: string
+    default: dev
+    values:
+      - dev
+      - staging
+      - prod
+
+  - name: version
+    type: string
+    default: "1.0.0"
+
+  - name: runTests
+    type: boolean
+    default: true
+
+  - name: replicas
+    type: number
+    default: 1
+
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildApp
+        steps:
+          - pwsh: |
+              Write-Host "Building version ${{ parameters.version }}"
+              Write-Host "Target environment: ${{ parameters.environment }}"
+            displayName: Build v${{ parameters.version }}
+
+  - stage: Test
+    dependsOn: Build
+    condition: eq('${{ parameters.runTests }}', 'true')
+    jobs:
+      - job: RunTests
+        steps:
+          - pwsh: |
+              Write-Host "Running tests for ${{ parameters.environment }}..."
+              Write-Host "All tests passed."
+            displayName: Test Suite
+
+  - stage: Deploy
+    dependsOn: Test
+    jobs:
+      - job: DeployApp
+        steps:
+          - pwsh: |
+              Write-Host "Deploying v${{ parameters.version }} to ${{ parameters.environment }}"
+              Write-Host "Scaling to ${{ parameters.replicas }} replica(s)"
+            displayName: Deploy ${{ parameters.environment }}

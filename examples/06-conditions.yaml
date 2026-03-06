@@ -1,0 +1,64 @@
+# Demonstrates conditional execution at step, job, and stage levels.
+name: Conditional Execution
+
+parameters:
+  - name: deployTarget
+    type: string
+    default: staging
+    values: [staging, prod]
+
+  - name: skipTests
+    type: boolean
+    default: false
+
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildApp
+        steps:
+          - pwsh: Write-Host "Building application..."
+            displayName: Build
+
+          # This step only runs when deploying to prod
+          - pwsh: Write-Host "Running security scan for production..."
+            displayName: Security Scan (prod only)
+            condition: eq('${{ parameters.deployTarget }}', 'prod')
+
+  - stage: Test
+    dependsOn: Build
+    # Skip entire stage if skipTests is true
+    condition: ne('${{ parameters.skipTests }}', 'true')
+    jobs:
+      - job: UnitTests
+        steps:
+          - pwsh: |
+              Write-Host "Running unit tests..."
+              Write-Host "All passed."
+            displayName: Unit Tests
+
+  - stage: Deploy
+    dependsOn: Test
+    jobs:
+      - job: DeployStaging
+        # Only deploy to staging when target is staging
+        condition: eq('${{ parameters.deployTarget }}', 'staging')
+        steps:
+          - pwsh: Write-Host "Deploying to STAGING..."
+            displayName: Deploy Staging
+
+      - job: DeployProd
+        # Only deploy to prod when target is prod
+        condition: eq('${{ parameters.deployTarget }}', 'prod')
+        steps:
+          - pwsh: Write-Host "Deploying to PRODUCTION..."
+            displayName: Deploy Production
+
+  - stage: Notify
+    dependsOn: Deploy
+    jobs:
+      - job: Always
+        steps:
+          # This step always runs, even if previous stages failed
+          - pwsh: Write-Host "Pipeline finished. Sending notification."
+            displayName: Send Notification
+            condition: always()

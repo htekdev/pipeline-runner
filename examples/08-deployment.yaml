@@ -1,0 +1,65 @@
+# Deployment job with full lifecycle hooks using runOnce strategy.
+# Lifecycle: preDeploy → deploy → routeTraffic → postRouteTraffic → on.success/on.failure
+name: Deployment Pipeline
+
+parameters:
+  - name: environment
+    type: string
+    default: staging
+
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildApp
+        steps:
+          - pwsh: |
+              Write-Host "Building application..."
+              Write-Host "##pipeline[setvariable variable=imageTag;isOutput=true]v1.2.3"
+            displayName: Build & Tag
+            name: build
+
+  - stage: Deploy
+    dependsOn: Build
+    jobs:
+      - deployment: DeployWeb
+        displayName: Deploy Web App
+        environment: ${{ parameters.environment }}
+        strategy:
+          runOnce:
+            preDeploy:
+              steps:
+                - pwsh: |
+                    Write-Host "Pre-deploy: Running database migrations..."
+                    Write-Host "Migrations complete."
+                  displayName: Run Migrations
+
+            deploy:
+              steps:
+                - pwsh: |
+                    Write-Host "Deploying to ${{ parameters.environment }}..."
+                    Write-Host "Deployment successful."
+                  displayName: Deploy Application
+
+            routeTraffic:
+              steps:
+                - pwsh: |
+                    Write-Host "Routing traffic to new deployment..."
+                    Write-Host "Traffic switched."
+                  displayName: Route Traffic
+
+            postRouteTraffic:
+              steps:
+                - pwsh: |
+                    Write-Host "Running smoke tests against live deployment..."
+                    Write-Host "Smoke tests passed."
+                  displayName: Smoke Tests
+
+            on:
+              success:
+                steps:
+                  - pwsh: Write-Host "Deployment to ${{ parameters.environment }} succeeded!"
+                    displayName: Success Notification
+              failure:
+                steps:
+                  - pwsh: Write-Host "Deployment FAILED. Rolling back..."
+                    displayName: Rollback

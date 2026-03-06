@@ -1,0 +1,48 @@
+# Three stages that run in dependency order: Build → Test → Deploy.
+# Build and Test run sequentially; Deploy only runs after both succeed.
+name: Multi-Stage Pipeline
+
+stages:
+  - stage: Build
+    displayName: Build Application
+    jobs:
+      - job: Compile
+        steps:
+          - pwsh: |
+              Write-Host "Compiling source code..."
+              Start-Sleep -Milliseconds 500
+              Write-Host "Build artifacts created."
+            displayName: Compile Source
+
+  - stage: Test
+    displayName: Run Tests
+    dependsOn: Build
+    jobs:
+      - job: UnitTests
+        displayName: Unit Tests
+        steps:
+          - pwsh: |
+              Write-Host "Running unit tests..."
+              Write-Host "42 tests passed, 0 failed."
+            displayName: Run Unit Tests
+
+      - job: IntegrationTests
+        displayName: Integration Tests
+        steps:
+          - pwsh: |
+              Write-Host "Running integration tests..."
+              Write-Host "15 tests passed, 0 failed."
+            displayName: Run Integration Tests
+
+  - stage: Deploy
+    displayName: Deploy to Staging
+    dependsOn:
+      - Build
+      - Test
+    jobs:
+      - job: DeployApp
+        steps:
+          - pwsh: |
+              Write-Host "Deploying application to staging environment..."
+              Write-Host "Deployment complete."
+            displayName: Deploy Application

@@ -1,0 +1,20 @@
+# Reusable step template — accepts parameters for customization.
+parameters:
+  - name: project
+    type: string
+  - name: configuration
+    type: string
+    default: Release
+
+steps:
+  - pwsh: |
+      Write-Host "Building ${{ parameters.project }} in ${{ parameters.configuration }} mode..."
+      Write-Host "Restoring dependencies..."
+      Write-Host "Compiling..."
+      Write-Host "Build of ${{ parameters.project }} complete."
+    displayName: Build ${{ parameters.project }}
+
+  - pwsh: |
+      Write-Host "Running tests for ${{ parameters.project }}..."
+      Write-Host "All tests passed."
+    displayName: Test ${{ parameters.project }}
