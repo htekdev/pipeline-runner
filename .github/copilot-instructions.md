@@ -25,6 +25,20 @@ npm run typecheck      # tsc --noEmit
 
 The project must be built (`npm run build`) before running integration or e2e tests — they execute against `dist/index.js`.
 
+### Coverage architecture
+
+Each test area has its own Vitest config with specific source coverage scope:
+
+| Config | Tests | Coverage scope | Thresholds |
+|--------|-------|---------------|------------|
+| `vitest.config.unit.ts` | `tests/unit/**` | `src/**` excluding `cli/`, `types/`, barrel `index.ts` | 80/75/80/80 |
+| `vitest.config.integration.ts` | `tests/integration/**` | `src/cli/**` | 80/75/80/80 |
+| `vitest.config.e2e.ts` | `tests/e2e/**` | `src/runtime/**` | 80/75/80/80 |
+
+**Do NOT use `vitest.workspace.ts` or `defineWorkspace`** — these are deprecated in Vitest 4.x. Use separate config files with `-c` flag instead.
+
+**V8 coverage only instruments directly-imported source code.** Tests that spawn `node dist/index.js` as a subprocess do NOT contribute to V8 coverage. To get coverage credit, tests must import source modules directly (e.g., `import { runCommand } from '../../src/cli/commands/run.js'`). Both integration and E2E suites have two patterns: subprocess tests (for realistic end-to-end validation) and source-importing tests (for V8 coverage).
+
 ## Architecture
 
 Piperun is a locally executable YAML pipeline runner inspired by Azure DevOps but with its own format. It compiles YAML into an execution plan, then runs stages → jobs → steps as real child processes.
@@ -87,13 +101,7 @@ CLI commands catch errors, format with chalk, and set `process.exitCode` (the `r
 - `1` — failure (any stage failed)
 - `2` — partial (some stages passed, some failed)
 
-### Testing structure
-
-| Suite | Config | Coverage scope |
-|-------|--------|---------------|
-| Unit (`tests/unit/`) | `vitest.config.unit.ts` | `src/**` excluding `cli/`, `types/`, barrel `index.ts` |
-| Integration (`tests/integration/`) | `vitest.config.integration.ts` | `src/cli/**` |
-| E2E (`tests/e2e/`) | `vitest.config.e2e.ts` | `src/runtime/**` |
+### Testing patterns
 
 - **Unit tests** import source modules directly and mock dependencies with `vi.fn()`/`vi.mock()`.
 - **Integration tests** have two patterns: subprocess tests (`node dist/index.js`) and source-importing tests that call CLI command functions directly for V8 coverage.
@@ -121,3 +129,17 @@ Parsed by `src/logging/command-parser.ts`, handled by `src/logging/commands/inde
 tsup produces two bundles:
 - **CLI binary** (`dist/index.js`) — has `#!/usr/bin/env node` shebang banner, no `.d.ts`
 - **Library** (`dist/lib.js`) — exports public API with `.d.ts` for programmatic use
+
+### Zod v4 (not v3)
+
+This project uses **Zod v4** (`zod@4.3.6`). Key API differences from v3:
+- `z.record(keySchema, valueSchema)` takes **2 arguments** (not 1)
+- Import from `'zod'` not `'zod/v4'`
+
+### Commander.js `--param.*` pattern
+
+The CLI supports `--param.name=value` for pipeline parameters. Commander.js requires **both** `allowUnknownOption(true)` AND `allowExcessArguments(true)` on any command that accepts `--param.*` — without both, Commander rejects the dotted flags as unrecognized options or excess positional arguments.
+
+### Git commands and hookflow
+
+This repo uses hookflow for agent governance. **Each git command must be a separate tool call** — do not chain `git add && git commit` in a single shell invocation. Hookflow validates each git operation individually.
