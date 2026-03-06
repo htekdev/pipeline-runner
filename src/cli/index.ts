@@ -3,6 +3,7 @@ import { runCommand } from './commands/run.js';
 import { validateCommand } from './commands/validate.js';
 import { listCommand } from './commands/list.js';
 import { planCommand } from './commands/plan.js';
+import { visualizeCommand } from './commands/visualize.js';
 
 const program = new Command();
 
@@ -55,6 +56,15 @@ program
   .action(async (file: string) => {
     const params = parseParamArgs(process.argv);
     await planCommand(file, { params });
+  });
+
+// piperun visualize [file]
+program
+  .command('visualize')
+  .description('Visualize the pipeline dependency graph')
+  .argument('[file]', 'Pipeline YAML file', 'pipeline.yaml')
+  .action(async (file: string) => {
+    await visualizeCommand(file);
   });
 
 program.parse();

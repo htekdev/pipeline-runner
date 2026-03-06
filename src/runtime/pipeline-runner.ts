@@ -66,11 +66,12 @@ export class PipelineRunner {
     try {
       // 1. Compile the pipeline
       console.log(chalk.bold('Loading pipeline...'));
+      const resolvedFilePath = path.resolve(options.workingDirectory, options.filePath);
       const compiler = new PipelineCompiler({
-        basePath: path.dirname(path.resolve(options.workingDirectory, options.filePath)),
+        basePath: path.dirname(resolvedFilePath),
       });
 
-      const compilationResult = await compiler.compile(options.filePath, options.params);
+      const compilationResult = await compiler.compile(resolvedFilePath, options.params);
       const pipeline = compilationResult.pipeline as PipelineDefinition;
 
       if (compilationResult.warnings.length > 0) {
