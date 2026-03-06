@@ -214,9 +214,30 @@ export class PipelineRunner {
 
         if (batchStages.length === 0) continue;
 
-        // Run independent stages in parallel
-        const batchPromises = batchStages.map((stage) =>
-          this.runSingleStage(
+        // Run independent stages in parallel, skipping those with failed upstream deps
+        const batchPromises = batchStages.map((stage) => {
+          // Check if upstream stage dependencies all succeeded
+          const stageDeps = normalizeDependsOn(stage.dependsOn);
+          const hasFailedUpstream = stageDeps.some((depName) => {
+            const depResult = allStageResults.find((r) => r.name === depName);
+            return depResult && depResult.status !== 'succeeded' && depResult.status !== 'succeededWithIssues';
+          });
+
+          if (hasFailedUpstream && !stage.condition) {
+            console.log(
+              chalk.yellow(
+                `Stage '${stage.stage}': Skipped (upstream dependency failed)`,
+              ),
+            );
+            return Promise.resolve({
+              name: stage.stage,
+              status: 'skipped' as PipelineStatus,
+              duration: 0,
+              jobs: [],
+            });
+          }
+
+          return this.runSingleStage(
             stage,
             pipelineContext,
             {
@@ -228,8 +249,8 @@ export class PipelineRunner {
               stepRunnerFactory,
             },
             options,
-          ),
-        );
+          );
+        });
 
         const batchResults = await Promise.allSettled(batchPromises);
 

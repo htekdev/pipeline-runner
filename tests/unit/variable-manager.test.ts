@@ -474,6 +474,48 @@ describe('VariableManager', () => {
     vm.exitScope();
     expect(vm.get('pipelineVar')).toBe('pv');
   });
+
+  // ── resolveRuntimeExpressions ──
+
+  it('resolves $[...] expressions in current scope variables', () => {
+    vm.enterScope('job', 'j');
+    vm.set('mapped', '$[dependencies.JobA.result]', { source: 'inline' });
+    vm.set('plain', 'no-expression', { source: 'inline' });
+
+    vm.resolveRuntimeExpressions((value) => {
+      if (value === '$[dependencies.JobA.result]') return 'Succeeded';
+      return value;
+    });
+
+    expect(vm.get('mapped')).toBe('Succeeded');
+    expect(vm.get('plain')).toBe('no-expression');
+  });
+
+  it('does not call resolver for variables without $[', () => {
+    vm.enterScope('job', 'j');
+    vm.set('noExpr', 'just a string');
+    const resolver = vi.fn();
+
+    vm.resolveRuntimeExpressions(resolver);
+
+    expect(resolver).not.toHaveBeenCalled();
+    expect(vm.get('noExpr')).toBe('just a string');
+  });
+
+  it('preserves original value when resolver returns same string', () => {
+    vm.enterScope('job', 'j');
+    vm.set('expr', '$[unknown.thing]', { source: 'inline' });
+
+    vm.resolveRuntimeExpressions((value) => value);
+
+    expect(vm.get('expr')).toBe('$[unknown.thing]');
+  });
+
+  it('is a no-op when no scopes exist', () => {
+    expect(() =>
+      vm.resolveRuntimeExpressions(() => 'resolved'),
+    ).not.toThrow();
+  });
 });
 
 // ─── OutputVariableStore ────────────────────────────────────────────────────────

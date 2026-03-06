@@ -589,8 +589,64 @@ steps:
 |---|---|---|
 | `variables.*` | Pipeline, stage, and job variables | `variables.buildConfig` |
 | `parameters.*` | Pipeline parameters | `parameters.environment` |
-| `dependencies.*` | Outputs from dependency jobs | `dependencies.Build.outputs.getVersion.appVersion` |
+| `dependencies.*` | Outputs from dependency jobs (same stage) | `dependencies.Build.outputs['step.var']` |
+| `stageDependencies.*` | Outputs from dependency stages | `stageDependencies.Build.Job.outputs['step.var']` |
 | `pipeline.*` | System variables | `pipeline.RunId`, `pipeline.Name` |
+
+### Output Variables Between Jobs and Stages
+
+Steps communicate output variables via `##pipeline[setvariable]` logging commands. Output variables can be passed between jobs and stages using runtime expressions in the `variables:` section.
+
+#### Same Job — Step to Step
+
+```yaml
+steps:
+  - pwsh: |
+      Write-Host "##pipeline[setvariable variable=myVar]hello"
+    name: setter
+  - pwsh: |
+      Write-Host "Value: $env:MYVAR"
+```
+
+#### Cross-Job — Explicit Mapping (ADO-style)
+
+```yaml
+jobs:
+  - job: Producer
+    steps:
+      - pwsh: |
+          Write-Host "##pipeline[setvariable variable=ver;isOutput=true]v2.0"
+        name: buildStep
+  - job: Consumer
+    dependsOn: Producer
+    variables:
+      myVersion: "$[dependencies.Producer.outputs['buildStep.ver']]"
+    steps:
+      - pwsh: Write-Host "Version $env:MYVERSION"
+```
+
+#### Cross-Stage — Explicit Mapping
+
+```yaml
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          - pwsh: |
+              Write-Host "##pipeline[setvariable variable=tag;isOutput=true]v1.0"
+            name: tagStep
+  - stage: Deploy
+    dependsOn: Build
+    variables:
+      deployTag: "$[stageDependencies.Build.BuildJob.outputs['tagStep.tag']]"
+    jobs:
+      - job: DeployJob
+        steps:
+          - pwsh: Write-Host "Deploying $env:DEPLOYTAG"
+```
+
+> **Piperun convenience:** Upstream output variables are also auto-injected into downstream jobs/stages as environment variables, so explicit mapping is optional for simple cases.
 
 ---
 

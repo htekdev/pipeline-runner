@@ -34,8 +34,104 @@ export interface ExpressionEngine {
 // Match ${{ expression }} — compile-time
 const COMPILE_TIME_PATTERN = /\$\{\{(.*?)\}\}/gs;
 
-// Match $[ expression ] — runtime (non-greedy, no nesting)
+// Match $[ expression ] — runtime (balanced brackets for nested access)
+// The regex approach doesn't handle nested brackets (e.g. outputs['key']),
+// so evaluateRuntime uses findRuntimeExpressions() instead.
 const RUNTIME_PATTERN = /\$\[(.*?)\]/gs;
+
+/**
+ * Find $[...] runtime expressions with balanced bracket matching.
+ * Handles nested brackets like $[dependencies.Job.outputs['step.var']].
+ */
+function findRuntimeExpressions(
+  input: string,
+): { start: number; end: number; body: string }[] {
+  const results: { start: number; end: number; body: string }[] = [];
+  let i = 0;
+  while (i < input.length - 1) {
+    if (input[i] === '$' && input[i + 1] === '[') {
+      let depth = 1;
+      let j = i + 2;
+      let inString = false;
+      let stringChar = '';
+
+      while (j < input.length && depth > 0) {
+        const ch = input[j];
+        if (inString) {
+          if (ch === stringChar) inString = false;
+        } else {
+          if (ch === "'" || ch === '"') {
+            inString = true;
+            stringChar = ch;
+          } else if (ch === '[') {
+            depth++;
+          } else if (ch === ']') {
+            depth--;
+          }
+        }
+        j++;
+      }
+
+      if (depth === 0) {
+        results.push({
+          start: i,
+          end: j,
+          body: input.substring(i + 2, j - 1),
+        });
+        i = j;
+      } else {
+        i++;
+      }
+    } else {
+      i++;
+    }
+  }
+  return results;
+}
+
+/**
+ * Process runtime expressions using balanced bracket matching.
+ * Unlike processExpressionPattern which uses regex, this handles
+ * nested bracket access in expressions like outputs['step.var'].
+ */
+function processRuntimeExpressions(
+  input: string,
+  evaluator: ExpressionEvaluator,
+  context: ExpressionContext,
+): ExpressionResult {
+  const expressions = findRuntimeExpressions(input);
+  if (expressions.length === 0) return input;
+
+  // Single expression covering entire input — return native type
+  if (
+    expressions.length === 1 &&
+    expressions[0].start === 0 &&
+    expressions[0].end === input.length
+  ) {
+    const body = expressions[0].body.trim();
+    if (body.length === 0) return '';
+    const ast = parseExpression(body);
+    return evaluator.evaluate(ast, context);
+  }
+
+  // Multiple expressions or mixed string — interpolate as string
+  let result = '';
+  let lastEnd = 0;
+  for (const expr of expressions) {
+    result += input.substring(lastEnd, expr.start);
+    const body = expr.body.trim();
+    if (body.length === 0) {
+      result += '';
+    } else {
+      const ast = parseExpression(body);
+      const value = evaluator.evaluate(ast, context);
+      result += coerceToString(value);
+    }
+    lastEnd = expr.end;
+  }
+  result += input.substring(lastEnd);
+  return result;
+}
 
 // ─── Expression evaluator ───────────────────────────────────────────────────
 
@@ -272,12 +368,7 @@ class ExpressionEngineImpl implements ExpressionEngine {
 
   evaluateRuntime(input: string, context: ExpressionContext): ExpressionResult {
     if (typeof input !== 'string') return input;
-    return processExpressionPattern(
-      input,
-      new RegExp(RUNTIME_PATTERN.source, 'gs'),
-      this.evaluator,
-      context,
-    );
+    return processRuntimeExpressions(input, this.evaluator, context);
   }
 
   expandMacros(input: string, variables: Record<string, string>): string {

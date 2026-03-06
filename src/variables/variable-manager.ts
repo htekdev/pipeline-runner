@@ -225,6 +225,26 @@ export class VariableManager {
   }
 
   /**
+   * Resolve runtime expressions ($[...]) in the current scope's variable values.
+   * Used to expand $[dependencies...] and $[stageDependencies...] mappings
+   * in job/stage variable sections.
+   */
+  resolveRuntimeExpressions(resolver: (value: string) => string): void {
+    const topScope = this.scopeStack[this.scopeStack.length - 1];
+    if (!topScope) return;
+
+    for (const [, resolved] of topScope.variables) {
+      if (resolved.value.includes('$[')) {
+        const newValue = resolver(resolved.value);
+        if (newValue !== resolved.value) {
+          resolved.value =
+            typeof newValue === 'string' ? newValue : String(newValue);
+        }
+      }
+    }
+  }
+
+  /**
    * Load a variable group from a YAML file.
    * Search order: each searchPath + `/groupName.yaml`, then
    * `~/.piperun/config/groups/groupName.yaml`.

@@ -728,4 +728,175 @@ name: "Broken
       expect(combined).toMatch(/error|invalid|unexpected/);
     });
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Group 11: Cross-Job & Cross-Stage Output Variables
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('Group 11: Cross-Job & Cross-Stage Output Variables', () => {
+    it('31. cross-job: output variable from Job A is accessible in Job B', { timeout: 30_000 }, async () => {
+      const outFile = path.join(tempDir, 'cli-cross-job.txt');
+      const pipeline = await writePipeline('cli-cross-job.yaml', `
+name: CLICrossJobOutput
+stages:
+  - stage: Build
+    jobs:
+      - job: Producer
+        steps:
+          - pwsh: |
+              Write-Host "##pipeline[setvariable variable=appVersion;isOutput=true]v5.0.0"
+            name: versionStep
+            displayName: Set Version
+      - job: Consumer
+        dependsOn: Producer
+        steps:
+          - pwsh: |
+              Set-Content -Path "${fwd(outFile)}" -Value "$env:APPVERSION"
+            displayName: Use Version
+`);
+      const { exitCode } = await runCli(['run', pipeline, '--verbose']);
+      expect(exitCode).toBe(0);
+      const content = await fs.readFile(outFile, 'utf-8');
+      expect(content.trim()).toBe('v5.0.0');
+    });
+
+    it('32. cross-job: dependency result condition gates execution', { timeout: 30_000 }, async () => {
+      const outFile = path.join(tempDir, 'cli-cross-job-cond.txt');
+      const pipeline = await writePipeline('cli-cross-job-cond.yaml', `
+name: CLICrossJobCondition
+stages:
+  - stage: Build
+    jobs:
+      - job: Builder
+        steps:
+          - pwsh: Write-Host "build done"
+            displayName: Build
+      - job: Deployer
+        dependsOn: Builder
+        condition: eq(dependencies.Builder.result, 'Succeeded')
+        steps:
+          - pwsh: |
+              Set-Content -Path "${fwd(outFile)}" -Value "deploy-ran"
+            displayName: Deploy
+`);
+      const { exitCode } = await runCli(['run', pipeline, '--verbose']);
+      expect(exitCode).toBe(0);
+      const content = await fs.readFile(outFile, 'utf-8');
+      expect(content.trim()).toBe('deploy-ran');
+    });
+
+    it('33. cross-stage: output variable propagates between stages', { timeout: 30_000 }, async () => {
+      const outFile = path.join(tempDir, 'cli-cross-stage.txt');
+      const pipeline = await writePipeline('cli-cross-stage.yaml', `
+name: CLICrossStageOutput
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          - pwsh: |
+              Write-Host "##pipeline[setvariable variable=imageTag;isOutput=true]sha-abc123"
+            name: buildStep
+            displayName: Build Image
+  - stage: Deploy
+    dependsOn: Build
+    jobs:
+      - job: DeployJob
+        steps:
+          - pwsh: |
+              Set-Content -Path "${fwd(outFile)}" -Value "$env:IMAGETAG"
+            displayName: Deploy Image
+`);
+      const { exitCode } = await runCli(['run', pipeline, '--verbose']);
+      expect(exitCode).toBe(0);
+      const content = await fs.readFile(outFile, 'utf-8');
+      expect(content.trim()).toBe('sha-abc123');
+    });
+
+    it('34. cross-stage: downstream stage skipped when upstream fails', { timeout: 30_000 }, async () => {
+      const outFile = path.join(tempDir, 'cli-cross-stage-fail.txt');
+      const pipeline = await writePipeline('cli-cross-stage-fail.yaml', `
+name: CLICrossStageFailSkip
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          - pwsh: |
+              Write-Host "Failing..."
+              exit 1
+            displayName: Fail Build
+  - stage: Deploy
+    dependsOn: Build
+    jobs:
+      - job: DeployJob
+        steps:
+          - pwsh: |
+              Set-Content -Path "${fwd(outFile)}" -Value "should-not-run"
+            displayName: Deploy
+`);
+      const { exitCode } = await runCli(['run', pipeline, '--verbose']);
+      expect(exitCode).not.toBe(0);
+      const fileExists = await fs.access(outFile).then(() => true).catch(() => false);
+      expect(fileExists).toBe(false);
+    });
+
+    it('35. cross-job: output mapped via $[dependencies] in variables section', { timeout: 30_000 }, async () => {
+      const outFile = path.join(tempDir, 'cli-cross-job-mapped.txt');
+      const pipeline = await writePipeline('cli-cross-job-mapped.yaml', `
+name: CLICrossJobMapped
+stages:
+  - stage: Build
+    jobs:
+      - job: Producer
+        steps:
+          - pwsh: |
+              Write-Host "##pipeline[setvariable variable=tag;isOutput=true]v9.0.0"
+            name: buildStep
+            displayName: Tag
+      - job: Consumer
+        dependsOn: Producer
+        variables:
+          myTag: "$[dependencies.Producer.outputs['buildStep.tag']]"
+        steps:
+          - pwsh: |
+              Set-Content -Path "${fwd(outFile)}" -Value "$env:MYTAG"
+            displayName: Use Tag
+`);
+      const { exitCode } = await runCli(['run', pipeline, '--verbose']);
+      expect(exitCode).toBe(0);
+      const content = await fs.readFile(outFile, 'utf-8');
+      expect(content.trim()).toBe('v9.0.0');
+    });
+
+    it('36. cross-stage: output mapped via $[stageDependencies] in variables section', { timeout: 30_000 }, async () => {
+      const outFile = path.join(tempDir, 'cli-cross-stage-mapped.txt');
+      const pipeline = await writePipeline('cli-cross-stage-mapped.yaml', `
+name: CLICrossStageMapped
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          - pwsh: |
+              Write-Host "##pipeline[setvariable variable=hash;isOutput=true]abc123"
+            name: buildStep
+            displayName: Build
+  - stage: Deploy
+    dependsOn: Build
+    variables:
+      deployHash: "$[stageDependencies.Build.BuildJob.outputs['buildStep.hash']]"
+    jobs:
+      - job: DeployJob
+        steps:
+          - pwsh: |
+              Set-Content -Path "${fwd(outFile)}" -Value "$env:DEPLOYHASH"
+            displayName: Deploy
+`);
+      const { exitCode } = await runCli(['run', pipeline, '--verbose']);
+      expect(exitCode).toBe(0);
+      const content = await fs.readFile(outFile, 'utf-8');
+      expect(content.trim()).toBe('abc123');
+    });
+  });
 });

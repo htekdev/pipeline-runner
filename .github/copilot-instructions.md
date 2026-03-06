@@ -57,8 +57,10 @@ Piperun is a locally executable YAML pipeline runner inspired by Azure DevOps bu
 ### Expression system — three syntaxes
 
 - `${{ expr }}` — compile-time evaluation (templates, conditions)
-- `$[ expr ]` — runtime evaluation (step display names, conditions)
+- `$[ expr ]` — runtime evaluation (step display names, conditions, variables section mappings)
 - `$(varName)` — macro expansion (variable substitution in step scripts)
+
+Runtime expressions support nested bracket access (e.g. `$[dependencies.Job.outputs['step.var']]`) via balanced bracket matching in `findRuntimeExpressions()` — NOT regex.
 
 ### Step execution model
 
@@ -119,6 +121,15 @@ Steps communicate with the runner via stdout commands:
 ```
 
 Parsed by `src/logging/command-parser.ts`, handled by `src/logging/commands/index.ts`.
+
+### Output variable propagation
+
+Output variables (`isOutput=true`) propagate between jobs and stages:
+- **Cross-job:** Consumer maps via `variables:` section with `$[dependencies.JobName.outputs['stepName.varName']]`
+- **Cross-stage:** Consumer maps via `variables:` section with `$[stageDependencies.StageName.JobName.outputs['stepName.varName']]`
+- **Auto-inject (piperun convenience):** Upstream outputs are automatically injected into downstream job/stage scopes as env vars
+
+Resolution happens in `job-runner.ts` and `stage-runner.ts` after loading variables, using `VariableManager.resolveRuntimeExpressions()` with the expression engine's `evaluateRuntime()`.
 
 ### Variable scoping hierarchy
 

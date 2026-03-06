@@ -833,4 +833,92 @@ describe('ExpressionEngine — edge cases', () => {
     const ctx = createTestContext();
     expect(engine.processObject(true, ctx, 'compile')).toBe(true);
   });
+
+  // ─── Runtime expression evaluation with nested brackets ─────────────────
+
+  describe('evaluateRuntime with nested bracket access', () => {
+    it('resolves $[dependencies.Job.outputs[\'step.var\']] with bracket access', () => {
+      const ctx = createTestContext({
+        dependencies: {
+          JobA: {
+            result: 'Succeeded',
+            outputs: { 'step1.myVar': 'hello' },
+          },
+        },
+      });
+      expect(
+        engine.evaluateRuntime(
+          "$[dependencies.JobA.outputs['step1.myVar']]",
+          ctx,
+        ),
+      ).toBe('hello');
+    });
+
+    it('resolves $[stageDependencies.Stage.Job.outputs[\'step.var\']]', () => {
+      const ctx = createTestContext({
+        dependencies: {
+          Build: {
+            result: 'Succeeded',
+            outputs: {},
+            BuildJob: {
+              result: 'Succeeded',
+              outputs: { 'tagStep.tag': 'v1.0' },
+            },
+          } as any,
+        },
+      });
+      expect(
+        engine.evaluateRuntime(
+          "$[stageDependencies.Build.BuildJob.outputs['tagStep.tag']]",
+          ctx,
+        ),
+      ).toBe('v1.0');
+    });
+
+    it('returns empty string for non-existent bracket path', () => {
+      const ctx = createTestContext({
+        dependencies: {
+          JobA: { result: 'Succeeded', outputs: {} },
+        },
+      });
+      expect(
+        engine.evaluateRuntime(
+          "$[dependencies.JobA.outputs['nonexist.var']]",
+          ctx,
+        ),
+      ).toBe('');
+    });
+
+    it('resolves simple runtime expression without brackets', () => {
+      const ctx = createTestContext({
+        dependencies: {
+          JobA: { result: 'Succeeded', outputs: {} },
+        },
+      });
+      expect(
+        engine.evaluateRuntime('$[dependencies.JobA.result]', ctx),
+      ).toBe('Succeeded');
+    });
+
+    it('passes through strings without $[...]', () => {
+      const ctx = createTestContext();
+      expect(engine.evaluateRuntime('plain string', ctx)).toBe(
+        'plain string',
+      );
+    });
+
+    it('handles mixed text and runtime expression', () => {
+      const ctx = createTestContext({
+        dependencies: {
+          JobA: { result: 'Succeeded', outputs: {} },
+        },
+      });
+      expect(
+        engine.evaluateRuntime(
+          'Status: $[dependencies.JobA.result]!',
+          ctx,
+        ),
+      ).toBe('Status: Succeeded!');
+    });
+  });
 });

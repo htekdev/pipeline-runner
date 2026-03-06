@@ -77,11 +77,32 @@ export class JobRunner {
         this.deps.variableManager.loadVariables(job.variables, 'job');
       }
 
-      // Build expression context for condition evaluation
+      // Inject output variables from upstream jobs so they appear in env
+      const depContext = this.deps.outputStore.buildDependencyContext();
+      for (const [, { outputs }] of Object.entries(depContext)) {
+        for (const [outputKey, value] of Object.entries(outputs)) {
+          const dotIndex = outputKey.indexOf('.');
+          const varName = dotIndex >= 0 ? outputKey.substring(dotIndex + 1) : outputKey;
+          this.deps.variableManager.set(varName, value, {
+            source: 'output',
+          });
+        }
+      }
+
+      // Build expression context for condition evaluation and variable resolution
       const exprContext = this.buildExpressionContext(
         stageContext,
         pipelineContext,
       );
+
+      // Resolve $[dependencies...] runtime expressions in job-level variables
+      this.deps.variableManager.resolveRuntimeExpressions((value) => {
+        const result = this.deps.expressionEngine.evaluateRuntime(
+          value,
+          exprContext,
+        );
+        return typeof result === 'string' ? result : String(result);
+      });
 
       // Evaluate job condition
       const shouldRun = this.deps.conditionEvaluator.evaluate(

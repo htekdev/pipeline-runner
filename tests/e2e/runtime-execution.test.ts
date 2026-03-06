@@ -2507,4 +2507,445 @@ stages:
       variableManager.exitScope();
     });
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Group 17: Output Variables (ADO-aligned)
+  //
+  // Azure DevOps output variable semantics:
+  //   Same job:       $(stepName.varName) or env var
+  //   Cross-job:      $[dependencies.JobName.outputs['stepName.varName']]
+  //                   mapped via job-level variables section
+  //   Cross-stage:    $[stageDependencies.StageName.JobName.outputs['stepName.varName']]
+  //                   mapped via stage/job-level variables section
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('Output Variables (ADO-aligned)', () => {
+
+    // ─── Same Job: Step-to-Step ─────────────────────────────────────────────
+
+    it('same-job: output variable accessible in next step via env var', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      const outFile = path.join(tempDir, 'same-job-env.txt');
+      const file = await writePipeline('same-job-env.yaml', `
+name: SameJobEnv
+steps:
+  - pwsh: |
+      Write-Host "##pipeline[setvariable variable=myVar]hello-from-step1"
+    name: setter
+    displayName: Set Variable
+  - pwsh: |
+      Set-Content -Path "${fwd(outFile)}" -Value "$env:MYVAR"
+    displayName: Read Variable
+`);
+      const result = await runPipeline(file);
+      expect(result.exitCode).toBe(0);
+      const content = await fs.readFile(outFile, 'utf-8');
+      expect(content.trim()).toBe('hello-from-step1');
+    });
+
+    it('same-job: isOutput=true variable accessible in next step via env var', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      const outFile = path.join(tempDir, 'same-job-isoutput.txt');
+      const file = await writePipeline('same-job-isoutput.yaml', `
+name: SameJobIsOutput
+steps:
+  - pwsh: |
+      Write-Host "##pipeline[setvariable variable=outVal;isOutput=true]exported123"
+    name: setter
+    displayName: Set Output
+  - pwsh: |
+      Set-Content -Path "${fwd(outFile)}" -Value "$env:OUTVAL"
+    displayName: Read Output
+`);
+      const result = await runPipeline(file);
+      expect(result.exitCode).toBe(0);
+      const content = await fs.readFile(outFile, 'utf-8');
+      expect(content.trim()).toBe('exported123');
+    });
+
+    // ─── Cross-Job: ADO explicit mapping via variables section ──────────────
+
+    it('cross-job: output mapped via $[dependencies] in variables section', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const outFile = path.join(tempDir, 'cross-job-dep-mapping.txt');
+      const file = await writePipeline('cross-job-dep-mapping.yaml', `
+name: CrossJobDepMapping
+stages:
+  - stage: Build
+    jobs:
+      - job: Producer
+        steps:
+          - pwsh: |
+              Write-Host "##pipeline[setvariable variable=buildVersion;isOutput=true]v2.0.0"
+            name: setVersion
+            displayName: Set Build Version
+      - job: Consumer
+        dependsOn: Producer
+        variables:
+          mappedVersion: "$[dependencies.Producer.outputs['setVersion.buildVersion']]"
+        steps:
+          - pwsh: |
+              Set-Content -Path "${fwd(outFile)}" -Value "$env:MAPPEDVERSION"
+            displayName: Read Mapped Version
+`);
+      const result = await runPipeline(file);
+      expect(result.exitCode).toBe(0);
+      const content = await fs.readFile(outFile, 'utf-8');
+      expect(content.trim()).toBe('v2.0.0');
+    });
+
+    it('cross-job: auto-injected output variable (piperun convenience)', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const outFile = path.join(tempDir, 'cross-job-auto.txt');
+      const file = await writePipeline('cross-job-auto.yaml', `
+name: CrossJobAuto
+stages:
+  - stage: Build
+    jobs:
+      - job: Producer
+        steps:
+          - pwsh: |
+              Write-Host "##pipeline[setvariable variable=buildVersion;isOutput=true]v2.0.0"
+            name: setVersion
+            displayName: Set Build Version
+      - job: Consumer
+        dependsOn: Producer
+        steps:
+          - pwsh: |
+              Set-Content -Path "${fwd(outFile)}" -Value "$env:BUILDVERSION"
+            displayName: Read Build Version
+`);
+      const result = await runPipeline(file);
+      expect(result.exitCode).toBe(0);
+      const content = await fs.readFile(outFile, 'utf-8');
+      expect(content.trim()).toBe('v2.0.0');
+    });
+
+    it('cross-job: multiple outputs mapped via variables section', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const outFile = path.join(tempDir, 'cross-job-multi-map.txt');
+      const file = await writePipeline('cross-job-multi-map.yaml', `
+name: CrossJobMultiMap
+stages:
+  - stage: Build
+    jobs:
+      - job: Producer
+        steps:
+          - pwsh: |
+              Write-Host "##pipeline[setvariable variable=ver;isOutput=true]3.1.0"
+              Write-Host "##pipeline[setvariable variable=art;isOutput=true]myapp.zip"
+            name: buildStep
+            displayName: Build and Tag
+      - job: Consumer
+        dependsOn: Producer
+        variables:
+          myVersion: "$[dependencies.Producer.outputs['buildStep.ver']]"
+          myArtifact: "$[dependencies.Producer.outputs['buildStep.art']]"
+        steps:
+          - pwsh: |
+              Set-Content -Path "${fwd(outFile)}" -Value "$env:MYVERSION|$env:MYARTIFACT"
+            displayName: Consume Outputs
+`);
+      const result = await runPipeline(file);
+      expect(result.exitCode).toBe(0);
+      const content = await fs.readFile(outFile, 'utf-8');
+      expect(content.trim()).toBe('3.1.0|myapp.zip');
+    });
+
+    it('cross-job: dependency result is available in conditions', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const outFile = path.join(tempDir, 'cross-job-condition.txt');
+      const file = await writePipeline('cross-job-condition.yaml', `
+name: CrossJobCondition
+stages:
+  - stage: Build
+    jobs:
+      - job: Builder
+        steps:
+          - pwsh: Write-Host "Build complete"
+            displayName: Build
+      - job: Deployer
+        dependsOn: Builder
+        condition: eq(dependencies.Builder.result, 'Succeeded')
+        steps:
+          - pwsh: |
+              Set-Content -Path "${fwd(outFile)}" -Value "deployed"
+            displayName: Deploy
+`);
+      const result = await runPipeline(file);
+      expect(result.exitCode).toBe(0);
+      expect(result.status).toBe('succeeded');
+      const content = await fs.readFile(outFile, 'utf-8');
+      expect(content.trim()).toBe('deployed');
+    });
+
+    it('cross-job: skipped when dependency condition is not met', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const outFile = path.join(tempDir, 'cross-job-skip.txt');
+      const file = await writePipeline('cross-job-skip.yaml', `
+name: CrossJobSkip
+stages:
+  - stage: Build
+    jobs:
+      - job: Builder
+        steps:
+          - pwsh: Write-Host "Build done"
+            displayName: Build
+      - job: Deployer
+        dependsOn: Builder
+        condition: eq(dependencies.Builder.result, 'Failed')
+        steps:
+          - pwsh: |
+              Set-Content -Path "${fwd(outFile)}" -Value "should-not-run"
+            displayName: Deploy
+`);
+      const result = await runPipeline(file);
+      expect(result.exitCode).toBe(0);
+      const fileExists = await fs.access(outFile).then(() => true).catch(() => false);
+      expect(fileExists).toBe(false);
+    });
+
+    // ─── Cross-Stage: ADO explicit mapping via stageDependencies ────────────
+
+    it('cross-stage: output mapped via $[stageDependencies] in variables section', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const outFile = path.join(tempDir, 'cross-stage-dep-mapping.txt');
+      const file = await writePipeline('cross-stage-dep-mapping.yaml', `
+name: CrossStageDepMapping
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          - pwsh: |
+              Write-Host "##pipeline[setvariable variable=releaseTag;isOutput=true]release-42"
+            name: tagStep
+            displayName: Tag Release
+  - stage: Deploy
+    dependsOn: Build
+    variables:
+      deployTag: "$[stageDependencies.Build.BuildJob.outputs['tagStep.releaseTag']]"
+    jobs:
+      - job: DeployJob
+        steps:
+          - pwsh: |
+              Set-Content -Path "${fwd(outFile)}" -Value "$env:DEPLOYTAG"
+            displayName: Use Release Tag
+`);
+      const result = await runPipeline(file);
+      expect(result.exitCode).toBe(0);
+      expect(result.stages.length).toBe(2);
+      const content = await fs.readFile(outFile, 'utf-8');
+      expect(content.trim()).toBe('release-42');
+    });
+
+    it('cross-stage: auto-injected output variable (piperun convenience)', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const outFile = path.join(tempDir, 'cross-stage-auto.txt');
+      const file = await writePipeline('cross-stage-auto.yaml', `
+name: CrossStageAuto
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          - pwsh: |
+              Write-Host "##pipeline[setvariable variable=releaseTag;isOutput=true]release-42"
+            name: tagStep
+            displayName: Tag Release
+  - stage: Deploy
+    dependsOn: Build
+    jobs:
+      - job: DeployJob
+        steps:
+          - pwsh: |
+              Set-Content -Path "${fwd(outFile)}" -Value "$env:RELEASETAG"
+            displayName: Use Release Tag
+`);
+      const result = await runPipeline(file);
+      expect(result.exitCode).toBe(0);
+      expect(result.stages.length).toBe(2);
+      const content = await fs.readFile(outFile, 'utf-8');
+      expect(content.trim()).toBe('release-42');
+    });
+
+    it('cross-stage: stage dependency result is available in conditions', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const outFile = path.join(tempDir, 'cross-stage-condition.txt');
+      const file = await writePipeline('cross-stage-condition.yaml', `
+name: CrossStageCondition
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          - pwsh: Write-Host "Building..."
+            displayName: Build
+  - stage: Deploy
+    dependsOn: Build
+    jobs:
+      - job: DeployJob
+        steps:
+          - pwsh: |
+              Set-Content -Path "${fwd(outFile)}" -Value "stage2-ran"
+            displayName: Deploy Step
+`);
+      const result = await runPipeline(file);
+      expect(result.exitCode).toBe(0);
+      expect(result.stages.length).toBe(2);
+      const content = await fs.readFile(outFile, 'utf-8');
+      expect(content.trim()).toBe('stage2-ran');
+    });
+
+    it('cross-stage: skipped when upstream stage fails', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const outFile = path.join(tempDir, 'cross-stage-fail-skip.txt');
+      const file = await writePipeline('cross-stage-fail-skip.yaml', `
+name: CrossStageFailSkip
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          - pwsh: |
+              Write-Host "Failing build"
+              exit 1
+            displayName: Fail Build
+  - stage: Deploy
+    dependsOn: Build
+    jobs:
+      - job: DeployJob
+        steps:
+          - pwsh: |
+              Set-Content -Path "${fwd(outFile)}" -Value "should-not-run"
+            displayName: Deploy Step
+`);
+      const result = await runPipeline(file);
+      expect(result.exitCode).not.toBe(0);
+      const fileExists = await fs.access(outFile).then(() => true).catch(() => false);
+      expect(fileExists).toBe(false);
+    });
+
+    // ─── Chained Dependencies ───────────────────────────────────────────────
+
+    it('cross-job: chain of 3 jobs passes outputs through dependency chain', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const outFile = path.join(tempDir, 'cross-job-chain.txt');
+      const file = await writePipeline('cross-job-chain.yaml', `
+name: CrossJobChain
+stages:
+  - stage: Pipeline
+    jobs:
+      - job: Step1
+        steps:
+          - pwsh: |
+              Write-Host "##pipeline[setvariable variable=fromStep1;isOutput=true]alpha"
+            name: s1
+            displayName: Produce Alpha
+      - job: Step2
+        dependsOn: Step1
+        steps:
+          - pwsh: |
+              Write-Host "##pipeline[setvariable variable=fromStep2;isOutput=true]beta"
+            name: s2
+            displayName: Produce Beta
+      - job: Step3
+        dependsOn: Step2
+        steps:
+          - pwsh: |
+              Set-Content -Path "${fwd(outFile)}" -Value "$env:FROMSTEP1|$env:FROMSTEP2"
+            displayName: Consume Both
+`);
+      const result = await runPipeline(file);
+      expect(result.exitCode).toBe(0);
+      const content = await fs.readFile(outFile, 'utf-8');
+      expect(content.trim()).toContain('beta');
+    });
+
+    it('cross-stage: multi-stage chain with output propagation', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const outFile = path.join(tempDir, 'cross-stage-chain.txt');
+      const file = await writePipeline('cross-stage-chain.yaml', `
+name: CrossStageChain
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildJob
+        steps:
+          - pwsh: |
+              Write-Host "##pipeline[setvariable variable=buildId;isOutput=true]build-99"
+            name: buildStep
+            displayName: Build
+  - stage: Test
+    dependsOn: Build
+    jobs:
+      - job: TestJob
+        steps:
+          - pwsh: |
+              Write-Host "##pipeline[setvariable variable=testResult;isOutput=true]passed"
+            name: testStep
+            displayName: Test
+  - stage: Deploy
+    dependsOn: Test
+    jobs:
+      - job: DeployJob
+        steps:
+          - pwsh: |
+              Set-Content -Path "${fwd(outFile)}" -Value "$env:TESTRESULT"
+            displayName: Deploy
+`);
+      const result = await runPipeline(file);
+      expect(result.exitCode).toBe(0);
+      expect(result.stages.length).toBe(3);
+      const content = await fs.readFile(outFile, 'utf-8');
+      expect(content.trim()).toBe('passed');
+    });
+
+    // ─── Secret Output Variables ────────────────────────────────────────────
+
+    it('same-job: secret output variable is masked in logs', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      const outFile = path.join(tempDir, 'secret-output.txt');
+      const file = await writePipeline('secret-output.yaml', `
+name: SecretOutput
+steps:
+  - pwsh: |
+      Write-Host "##pipeline[setvariable variable=token;isOutput=true;isSecret=true]super-secret-123"
+    name: setSecret
+    displayName: Set Secret
+  - pwsh: |
+      Set-Content -Path "${fwd(outFile)}" -Value "$env:TOKEN"
+    displayName: Use Secret
+`);
+      const result = await runPipeline(file);
+      expect(result.exitCode).toBe(0);
+      const content = await fs.readFile(outFile, 'utf-8');
+      expect(content.trim()).toBe('super-secret-123');
+    });
+  });
 });

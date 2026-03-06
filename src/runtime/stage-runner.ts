@@ -87,8 +87,31 @@ export class StageRunner {
         this.deps.variableManager.loadVariables(stage.variables, 'stage');
       }
 
-      // Build expression context for condition evaluation
+      // Inject output variables from upstream stages so they appear in env
+      const stageDepContext = this.deps.outputStore.buildStageDependencyContext();
+      for (const [, jobEntries] of Object.entries(stageDepContext)) {
+        for (const [, { outputs }] of Object.entries(jobEntries)) {
+          for (const [outputKey, value] of Object.entries(outputs)) {
+            const dotIndex = outputKey.indexOf('.');
+            const varName = dotIndex >= 0 ? outputKey.substring(dotIndex + 1) : outputKey;
+            this.deps.variableManager.set(varName, value, {
+              source: 'output',
+            });
+          }
+        }
+      }
+
+      // Build expression context for condition evaluation and variable resolution
       const exprContext = this.buildExpressionContext(pipelineContext);
+
+      // Resolve $[stageDependencies...] runtime expressions in stage-level variables
+      this.deps.variableManager.resolveRuntimeExpressions((value) => {
+        const result = this.deps.expressionEngine.evaluateRuntime(
+          value,
+          exprContext,
+        );
+        return typeof result === 'string' ? result : String(result);
+      });
 
       // Evaluate stage condition
       const shouldRun = this.deps.conditionEvaluator.evaluate(
@@ -191,6 +214,21 @@ export class StageRunner {
               jobResult.name,
               this.statusToResultLabel(jobResult.status),
             );
+
+            // Promote job outputs to stage level for cross-stage references
+            const jobOutputs = this.deps.outputStore.getJobOutputs(jobResult.name);
+            for (const [outputKey, value] of Object.entries(jobOutputs)) {
+              const dotIndex = outputKey.indexOf('.');
+              const stepName = dotIndex >= 0 ? outputKey.substring(0, dotIndex) : '__unknown';
+              const varName = dotIndex >= 0 ? outputKey.substring(dotIndex + 1) : outputKey;
+              this.deps.outputStore.setStageLevelOutput(
+                stageName,
+                jobResult.name,
+                stepName,
+                varName,
+                value,
+              );
+            }
           } else {
             // Job promise rejected (unexpected error)
             const errorResult: JobRunResult = {
