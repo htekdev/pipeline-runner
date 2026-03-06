@@ -71,6 +71,16 @@ Each step type spawns a real child process:
 
 Temp files are created in `os.tmpdir()` and cleaned up in `finally` blocks. Output is streamed via `readline` on stdout/stderr pipes. `##pipeline[...]` logging commands are parsed from stdout in real-time.
 
+### Matrix / parallel strategy
+
+`StrategyRunner` (src/runtime/strategy-runner.ts) expands matrix/parallel strategies into job instances. Integration is in `StageRunner.runSingleJob()` — when a `RegularJobDefinition` has a `strategy`, it delegates to `runStrategyJob()` which:
+1. Calls `expandStrategy()` to create instances (named `{job}_{config}`)
+2. Merges instance variables into the job's variable definitions
+3. Runs instances via `runInstances()` with `maxParallel` throttling
+4. Aggregates results into a single parent `JobRunResult`
+
+Matrix values in YAML use `z.coerce.string()` in the schema to handle booleans/numbers. Variables are accessible in steps via environment variables (e.g., `$env:NODEVERSION` in PowerShell).
+
 ### Dependency injection pattern
 
 Runners receive their dependencies via constructor injection — `PipelineRunner.run()` takes a `conditionEvaluator` and `stepRunnerFactory`. This makes the runtime testable without spawning processes.
