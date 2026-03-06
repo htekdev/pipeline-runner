@@ -1,0 +1,757 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import {
+  createFunctionRegistry,
+  lookupFunction,
+  resetCounters,
+  isTruthy,
+  createStatusFunctions,
+} from '../../src/functions/index.js';
+import type { FunctionRegistry, ExpressionResult, StatusContext } from '../../src/functions/index.js';
+
+// ──────────────────────────────────────────
+// Helpers
+// ──────────────────────────────────────────
+let registry: FunctionRegistry;
+
+beforeEach(() => {
+  resetCounters();
+  registry = createFunctionRegistry({
+    currentJobStatus: 'Succeeded',
+    dependencyResults: {
+      build: 'Succeeded',
+      test: 'Failed',
+      lint: 'SucceededWithIssues',
+    },
+    isCanceled: false,
+  });
+});
+
+function call(name: string, ...args: ExpressionResult[]): ExpressionResult {
+  const fn = lookupFunction(registry, name);
+  if (!fn) throw new Error(`Function "${name}" not found in registry`);
+  return fn(...args);
+}
+
+// ──────────────────────────────────────────
+// Logical functions
+// ──────────────────────────────────────────
+describe('logical functions', () => {
+  describe('isTruthy', () => {
+    it.each([
+      [null, false],
+      [false, false],
+      [0, false],
+      ['', false],
+      ['false', false],
+      ['False', false],
+      ['FALSE', false],
+      ['0', false],
+      [true, true],
+      [1, true],
+      ['hello', true],
+      ['True', true],
+      ['true', true],
+      [42, true],
+      [-1, true],
+      [[], true],
+      [{}, true],
+    ])('isTruthy(%j) → %j', (input, expected) => {
+      expect(isTruthy(input as ExpressionResult)).toBe(expected);
+    });
+  });
+
+  describe('and', () => {
+    it('returns true when all args are truthy', () => {
+      expect(call('and', true, 1, 'yes')).toBe(true);
+    });
+
+    it('returns false when any arg is falsy', () => {
+      expect(call('and', true, '', 'yes')).toBe(false);
+    });
+
+    it('returns false with fewer than 2 args', () => {
+      expect(call('and', true)).toBe(false);
+    });
+
+    it('short-circuits on first falsy value', () => {
+      expect(call('and', false, true, true)).toBe(false);
+    });
+  });
+
+  describe('or', () => {
+    it('returns true when any arg is truthy', () => {
+      expect(call('or', false, 0, 'yes')).toBe(true);
+    });
+
+    it('returns false when all args are falsy', () => {
+      expect(call('or', false, 0, '', null)).toBe(false);
+    });
+
+    it('returns false with fewer than 2 args', () => {
+      expect(call('or', true)).toBe(false);
+    });
+
+    it('short-circuits on first truthy value', () => {
+      expect(call('or', 'hello', false)).toBe(true);
+    });
+  });
+
+  describe('not', () => {
+    it('returns true for falsy values', () => {
+      expect(call('not', false)).toBe(true);
+      expect(call('not', 0)).toBe(true);
+      expect(call('not', '')).toBe(true);
+      expect(call('not', null)).toBe(true);
+      expect(call('not', 'false')).toBe(true);
+    });
+
+    it('returns false for truthy values', () => {
+      expect(call('not', true)).toBe(false);
+      expect(call('not', 1)).toBe(false);
+      expect(call('not', 'hello')).toBe(false);
+    });
+  });
+
+  describe('xor', () => {
+    it('returns true when exactly one arg is truthy', () => {
+      expect(call('xor', true, false)).toBe(true);
+      expect(call('xor', false, true)).toBe(true);
+    });
+
+    it('returns false when both are truthy or both are falsy', () => {
+      expect(call('xor', true, true)).toBe(false);
+      expect(call('xor', false, false)).toBe(false);
+    });
+  });
+
+  describe('iif', () => {
+    it('returns trueValue when condition is truthy', () => {
+      expect(call('iif', true, 'yes', 'no')).toBe('yes');
+    });
+
+    it('returns falseValue when condition is falsy', () => {
+      expect(call('iif', false, 'yes', 'no')).toBe('no');
+    });
+
+    it('returns null for missing arguments', () => {
+      expect(call('iif', true)).toBe(null);
+    });
+
+    it('handles string truthiness in condition', () => {
+      expect(call('iif', 'False', 'yes', 'no')).toBe('no');
+      expect(call('iif', 'True', 'yes', 'no')).toBe('yes');
+    });
+  });
+});
+
+// ──────────────────────────────────────────
+// Comparison functions
+// ──────────────────────────────────────────
+describe('comparison functions', () => {
+  describe('eq', () => {
+    it('compares equal strings (case-insensitive)', () => {
+      expect(call('eq', 'Hello', 'hello')).toBe(true);
+    });
+
+    it('compares equal numbers', () => {
+      expect(call('eq', 42, 42)).toBe(true);
+    });
+
+    it('compares different values', () => {
+      expect(call('eq', 'abc', 'def')).toBe(false);
+    });
+
+    it('null == null is true', () => {
+      expect(call('eq', null, null)).toBe(true);
+    });
+
+    it('null vs non-null is false', () => {
+      expect(call('eq', null, 'hello')).toBe(false);
+      expect(call('eq', 0, null)).toBe(false);
+    });
+
+    it('coerces string to number when compared with number', () => {
+      expect(call('eq', '42', 42)).toBe(true);
+      expect(call('eq', 10, '10')).toBe(true);
+    });
+
+    it('handles boolean comparison', () => {
+      expect(call('eq', true, true)).toBe(true);
+      expect(call('eq', true, false)).toBe(false);
+    });
+
+    it('handles boolean vs number coercion', () => {
+      expect(call('eq', true, 1)).toBe(true);
+      expect(call('eq', false, 0)).toBe(true);
+    });
+  });
+
+  describe('ne', () => {
+    it('returns true for different values', () => {
+      expect(call('ne', 'abc', 'def')).toBe(true);
+    });
+
+    it('returns false for equal values', () => {
+      expect(call('ne', 'hello', 'HELLO')).toBe(false);
+    });
+  });
+
+  describe('gt', () => {
+    it('compares numbers', () => {
+      expect(call('gt', 10, 5)).toBe(true);
+      expect(call('gt', 5, 10)).toBe(false);
+      expect(call('gt', 5, 5)).toBe(false);
+    });
+
+    it('compares strings ordinally (case-insensitive)', () => {
+      expect(call('gt', 'b', 'a')).toBe(true);
+      expect(call('gt', 'a', 'b')).toBe(false);
+    });
+
+    it('handles null (null < everything)', () => {
+      expect(call('gt', 'a', null)).toBe(true);
+      expect(call('gt', null, 'a')).toBe(false);
+    });
+  });
+
+  describe('lt', () => {
+    it('compares numbers', () => {
+      expect(call('lt', 5, 10)).toBe(true);
+      expect(call('lt', 10, 5)).toBe(false);
+    });
+  });
+
+  describe('ge', () => {
+    it('compares numbers', () => {
+      expect(call('ge', 10, 5)).toBe(true);
+      expect(call('ge', 5, 5)).toBe(true);
+      expect(call('ge', 4, 5)).toBe(false);
+    });
+  });
+
+  describe('le', () => {
+    it('compares numbers', () => {
+      expect(call('le', 5, 10)).toBe(true);
+      expect(call('le', 5, 5)).toBe(true);
+      expect(call('le', 6, 5)).toBe(false);
+    });
+  });
+
+  describe('in', () => {
+    it('returns true when needle is found in haystack', () => {
+      expect(call('in', 'b', 'a', 'b', 'c')).toBe(true);
+    });
+
+    it('returns false when needle is not found', () => {
+      expect(call('in', 'd', 'a', 'b', 'c')).toBe(false);
+    });
+
+    it('uses eq semantics (case-insensitive)', () => {
+      expect(call('in', 'HELLO', 'hello', 'world')).toBe(true);
+    });
+
+    it('returns false with less than 2 args', () => {
+      expect(call('in', 'a')).toBe(false);
+    });
+
+    it('handles numeric coercion', () => {
+      expect(call('in', '42', 41, 42, 43)).toBe(true);
+    });
+  });
+
+  describe('notIn', () => {
+    it('returns true when needle is not in haystack', () => {
+      expect(call('notin', 'd', 'a', 'b', 'c')).toBe(true);
+    });
+
+    it('returns false when needle is found', () => {
+      expect(call('notin', 'b', 'a', 'b', 'c')).toBe(false);
+    });
+
+    it('returns true with fewer than 2 args', () => {
+      expect(call('notin', 'a')).toBe(true);
+    });
+  });
+});
+
+// ──────────────────────────────────────────
+// String functions
+// ──────────────────────────────────────────
+describe('string functions', () => {
+  describe('contains', () => {
+    it('returns true when haystack contains needle (case-insensitive)', () => {
+      expect(call('contains', 'Hello World', 'WORLD')).toBe(true);
+    });
+
+    it('returns false when haystack does not contain needle', () => {
+      expect(call('contains', 'Hello World', 'xyz')).toBe(false);
+    });
+
+    it('handles non-string inputs', () => {
+      expect(call('contains', 42, '4')).toBe(true);
+    });
+
+    it('handles null inputs', () => {
+      expect(call('contains', null, '')).toBe(true);
+    });
+  });
+
+  describe('startsWith', () => {
+    it('returns true when string starts with prefix (case-insensitive)', () => {
+      expect(call('startswith', 'Hello World', 'HELLO')).toBe(true);
+    });
+
+    it('returns false when string does not start with prefix', () => {
+      expect(call('startswith', 'Hello World', 'World')).toBe(false);
+    });
+  });
+
+  describe('endsWith', () => {
+    it('returns true when string ends with suffix (case-insensitive)', () => {
+      expect(call('endswith', 'Hello World', 'WORLD')).toBe(true);
+    });
+
+    it('returns false when string does not end with suffix', () => {
+      expect(call('endswith', 'Hello World', 'Hello')).toBe(false);
+    });
+  });
+
+  describe('format', () => {
+    it('replaces positional placeholders', () => {
+      expect(call('format', 'Hello {0}!', 'World')).toBe('Hello World!');
+    });
+
+    it('handles multiple placeholders', () => {
+      expect(call('format', '{0} + {1} = {2}', 1, 2, 3)).toBe('1 + 2 = 3');
+    });
+
+    it('handles repeated placeholders', () => {
+      expect(call('format', '{0}-{0}', 'abc')).toBe('abc-abc');
+    });
+
+    it('escapes double braces', () => {
+      expect(call('format', '{{0}} is {0}', 'value')).toBe('{0} is value');
+    });
+
+    it('escapes double closing braces', () => {
+      expect(call('format', '{0} }}end', 'start')).toBe('start }end');
+    });
+
+    it('preserves invalid placeholders with out-of-range index', () => {
+      expect(call('format', '{0} {5}', 'only')).toBe('only {5}');
+    });
+
+    it('handles format specifier for dates', () => {
+      // Use a fixed date — 2024-03-15T10:30:45Z
+      const result = call('format', '{0:yyyyMMdd}', '2024-03-15T10:30:45Z');
+      expect(result).toBe('20240315');
+    });
+
+    it('handles null arguments', () => {
+      expect(call('format', 'val={0}', null)).toBe('val=');
+    });
+
+    it('handles boolean arguments', () => {
+      expect(call('format', '{0}', true)).toBe('True');
+    });
+  });
+
+  describe('join', () => {
+    it('joins array elements with separator', () => {
+      expect(call('join', ', ', ['a', 'b', 'c'])).toBe('a, b, c');
+    });
+
+    it('converts elements to strings', () => {
+      expect(call('join', '-', [1, 2, 3])).toBe('1-2-3');
+    });
+
+    it('converts complex objects to empty string', () => {
+      expect(call('join', ',', ['a', { key: 'val' }, 'b'])).toBe('a,,b');
+    });
+
+    it('handles non-array input', () => {
+      expect(call('join', ',', 'hello')).toBe('hello');
+    });
+
+    it('handles null elements', () => {
+      expect(call('join', ',', ['a', null, 'b'])).toBe('a,,b');
+    });
+  });
+
+  describe('split', () => {
+    it('splits a string by delimiter', () => {
+      expect(call('split', 'a,b,c', ',')).toEqual(['a', 'b', 'c']);
+    });
+
+    it('returns array with original string for empty delimiter', () => {
+      expect(call('split', 'abc', '')).toEqual(['abc']);
+    });
+
+    it('handles null input', () => {
+      expect(call('split', null, ',')).toEqual(['']);
+    });
+  });
+
+  describe('replace', () => {
+    it('replaces all occurrences', () => {
+      expect(call('replace', 'aabbcc', 'bb', 'XX')).toBe('aaXXcc');
+    });
+
+    it('replaces multiple occurrences', () => {
+      expect(call('replace', 'abab', 'ab', 'X')).toBe('XX');
+    });
+
+    it('handles empty oldValue (returns original)', () => {
+      expect(call('replace', 'hello', '', 'X')).toBe('hello');
+    });
+
+    it('handles no matches', () => {
+      expect(call('replace', 'hello', 'xyz', 'abc')).toBe('hello');
+    });
+  });
+
+  describe('upper', () => {
+    it('converts to uppercase', () => {
+      expect(call('upper', 'hello')).toBe('HELLO');
+    });
+
+    it('handles non-string input', () => {
+      expect(call('upper', 42)).toBe('42');
+    });
+  });
+
+  describe('lower', () => {
+    it('converts to lowercase', () => {
+      expect(call('lower', 'HELLO')).toBe('hello');
+    });
+  });
+
+  describe('trim', () => {
+    it('trims whitespace', () => {
+      expect(call('trim', '  hello  ')).toBe('hello');
+    });
+
+    it('trims tabs and newlines', () => {
+      expect(call('trim', '\t\nhello\r\n')).toBe('hello');
+    });
+  });
+});
+
+// ──────────────────────────────────────────
+// Collection functions
+// ──────────────────────────────────────────
+describe('collection functions', () => {
+  describe('containsValue', () => {
+    it('finds value in array', () => {
+      expect(call('containsvalue', ['a', 'b', 'c'], 'b')).toBe(true);
+    });
+
+    it('finds value in array (case-insensitive)', () => {
+      expect(call('containsvalue', ['Hello', 'World'], 'hello')).toBe(true);
+    });
+
+    it('returns false when value not in array', () => {
+      expect(call('containsvalue', ['a', 'b'], 'z')).toBe(false);
+    });
+
+    it('finds value in object properties', () => {
+      expect(call('containsvalue', { x: 'hello', y: 'world' } as unknown as ExpressionResult, 'world')).toBe(true);
+    });
+
+    it('returns false for non-collection input', () => {
+      expect(call('containsvalue', 'string', 's')).toBe(false);
+    });
+
+    it('returns false for null collection', () => {
+      expect(call('containsvalue', null, 'a')).toBe(false);
+    });
+  });
+
+  describe('length', () => {
+    it('returns string length', () => {
+      expect(call('length', 'hello')).toBe(5);
+    });
+
+    it('returns array length', () => {
+      expect(call('length', [1, 2, 3])).toBe(3);
+    });
+
+    it('returns object property count', () => {
+      expect(call('length', { a: 1, b: 2 } as unknown as ExpressionResult)).toBe(2);
+    });
+
+    it('returns 0 for null', () => {
+      expect(call('length', null)).toBe(0);
+    });
+
+    it('returns string length for numbers', () => {
+      expect(call('length', 42)).toBe(2);
+    });
+
+    it('returns 0 for empty string', () => {
+      expect(call('length', '')).toBe(0);
+    });
+
+    it('returns 0 for empty array', () => {
+      expect(call('length', [])).toBe(0);
+    });
+  });
+
+  describe('convertToJson', () => {
+    it('converts string to JSON', () => {
+      expect(call('converttojson', 'hello')).toBe('"hello"');
+    });
+
+    it('converts number to JSON', () => {
+      expect(call('converttojson', 42)).toBe('42');
+    });
+
+    it('converts array to JSON', () => {
+      expect(call('converttojson', [1, 2, 3])).toBe('[1,2,3]');
+    });
+
+    it('converts object to JSON', () => {
+      expect(call('converttojson', { a: 1 } as unknown as ExpressionResult)).toBe('{"a":1}');
+    });
+
+    it('converts null to JSON', () => {
+      expect(call('converttojson', null)).toBe('null');
+    });
+
+    it('converts boolean to JSON', () => {
+      expect(call('converttojson', true)).toBe('true');
+    });
+  });
+
+  describe('counter', () => {
+    it('returns seed on first call', () => {
+      expect(call('counter', 'test', 10)).toBe(10);
+    });
+
+    it('increments on subsequent calls', () => {
+      call('counter', 'inc', 0);
+      expect(call('counter', 'inc')).toBe(1);
+      expect(call('counter', 'inc')).toBe(2);
+    });
+
+    it('tracks separate prefixes independently', () => {
+      expect(call('counter', 'alpha', 100)).toBe(100);
+      expect(call('counter', 'beta', 200)).toBe(200);
+      expect(call('counter', 'alpha')).toBe(101);
+      expect(call('counter', 'beta')).toBe(201);
+    });
+
+    it('uses 0 as default seed', () => {
+      expect(call('counter', 'default')).toBe(0);
+      expect(call('counter', 'default')).toBe(1);
+    });
+  });
+
+  describe('coalesce', () => {
+    it('returns first non-null, non-empty value', () => {
+      expect(call('coalesce', null, '', 'hello', 'world')).toBe('hello');
+    });
+
+    it('returns empty string if all are null/empty', () => {
+      expect(call('coalesce', null, '', null)).toBe('');
+    });
+
+    it('returns first value if it is non-null', () => {
+      expect(call('coalesce', 'first', 'second')).toBe('first');
+    });
+
+    it('skips 0 (number zero is not null/empty)', () => {
+      expect(call('coalesce', null, 0, 'hello')).toBe(0);
+    });
+
+    it('returns false (boolean false is not null/empty)', () => {
+      expect(call('coalesce', null, false, 'hello')).toBe(false);
+    });
+  });
+});
+
+// ──────────────────────────────────────────
+// Status functions
+// ──────────────────────────────────────────
+describe('status functions', () => {
+  describe('succeeded', () => {
+    it('returns false when any dependency failed (no args)', () => {
+      // default context has build=Succeeded, test=Failed, lint=SucceededWithIssues
+      expect(call('succeeded')).toBe(false);
+    });
+
+    it('returns true when checking a specific succeeded job', () => {
+      expect(call('succeeded', 'build')).toBe(true);
+    });
+
+    it('returns true for SucceededWithIssues job', () => {
+      expect(call('succeeded', 'lint')).toBe(true);
+    });
+
+    it('returns false for a specific failed job', () => {
+      expect(call('succeeded', 'test')).toBe(false);
+    });
+
+    it('returns true when all named jobs succeeded', () => {
+      expect(call('succeeded', 'build', 'lint')).toBe(true);
+    });
+
+    it('returns false when any named job failed', () => {
+      expect(call('succeeded', 'build', 'test')).toBe(false);
+    });
+
+    it('returns false for unknown job name', () => {
+      expect(call('succeeded', 'nonexistent')).toBe(false);
+    });
+
+    it('returns true with no deps and Succeeded status', () => {
+      const reg = createFunctionRegistry({
+        currentJobStatus: 'Succeeded',
+        dependencyResults: {},
+        isCanceled: false,
+      });
+      const fn = lookupFunction(reg, 'succeeded')!;
+      expect(fn()).toBe(true);
+    });
+  });
+
+  describe('failed', () => {
+    it('returns true when any dependency failed (no args)', () => {
+      expect(call('failed')).toBe(true);
+    });
+
+    it('returns true for a specific failed job', () => {
+      expect(call('failed', 'test')).toBe(true);
+    });
+
+    it('returns false for a specific succeeded job', () => {
+      expect(call('failed', 'build')).toBe(false);
+    });
+
+    it('returns true when checking multiple jobs and one failed', () => {
+      expect(call('failed', 'build', 'test')).toBe(true);
+    });
+
+    it('returns false for unknown job name', () => {
+      expect(call('failed', 'nonexistent')).toBe(false);
+    });
+
+    it('returns false with no deps and Succeeded status', () => {
+      const reg = createFunctionRegistry({
+        currentJobStatus: 'Succeeded',
+        dependencyResults: {},
+        isCanceled: false,
+      });
+      const fn = lookupFunction(reg, 'failed')!;
+      expect(fn()).toBe(false);
+    });
+  });
+
+  describe('succeededOrFailed', () => {
+    it('returns true with no args (always)', () => {
+      expect(call('succeededorfailed')).toBe(true);
+    });
+
+    it('returns true for succeeded/failed jobs', () => {
+      expect(call('succeededorfailed', 'build', 'test')).toBe(true);
+    });
+
+    it('returns true for SucceededWithIssues', () => {
+      expect(call('succeededorfailed', 'lint')).toBe(true);
+    });
+
+    it('returns false for unknown job (not in results)', () => {
+      expect(call('succeededorfailed', 'nonexistent')).toBe(false);
+    });
+  });
+
+  describe('always', () => {
+    it('always returns true', () => {
+      expect(call('always')).toBe(true);
+    });
+
+    it('returns true even when canceled', () => {
+      const reg = createFunctionRegistry({
+        currentJobStatus: 'Canceled',
+        dependencyResults: {},
+        isCanceled: true,
+      });
+      expect(lookupFunction(reg, 'always')!()).toBe(true);
+    });
+  });
+
+  describe('canceled', () => {
+    it('returns false when not canceled', () => {
+      expect(call('canceled')).toBe(false);
+    });
+
+    it('returns true when canceled', () => {
+      const reg = createFunctionRegistry({
+        currentJobStatus: 'Canceled',
+        dependencyResults: {},
+        isCanceled: true,
+      });
+      expect(lookupFunction(reg, 'canceled')!()).toBe(true);
+    });
+  });
+});
+
+// ──────────────────────────────────────────
+// Registry
+// ──────────────────────────────────────────
+describe('function registry', () => {
+  const expectedFunctions = [
+    // logical
+    'and', 'or', 'not', 'xor', 'iif',
+    // comparison
+    'eq', 'ne', 'gt', 'lt', 'ge', 'le', 'in', 'notin',
+    // string
+    'contains', 'startswith', 'endswith', 'format', 'join',
+    'split', 'replace', 'upper', 'lower', 'trim',
+    // collection
+    'containsvalue', 'length', 'converttojson', 'counter', 'coalesce',
+    // status
+    'succeeded', 'failed', 'succeededorfailed', 'always', 'canceled',
+  ];
+
+  it('registers all expected functions', () => {
+    for (const name of expectedFunctions) {
+      expect(lookupFunction(registry, name)).toBeDefined();
+    }
+  });
+
+  it('performs case-insensitive lookup', () => {
+    expect(lookupFunction(registry, 'AND')).toBeDefined();
+    expect(lookupFunction(registry, 'Contains')).toBeDefined();
+    expect(lookupFunction(registry, 'EQ')).toBeDefined();
+    expect(lookupFunction(registry, 'ConvertToJson')).toBeDefined();
+    expect(lookupFunction(registry, 'SUCCEEDED')).toBeDefined();
+  });
+
+  it('returns undefined for unknown functions', () => {
+    expect(lookupFunction(registry, 'nonexistent')).toBeUndefined();
+  });
+
+  it('creates registry without status context', () => {
+    const reg = createFunctionRegistry();
+    expect(lookupFunction(reg, 'and')).toBeDefined();
+    expect(lookupFunction(reg, 'succeeded')).toBeUndefined();
+  });
+
+  it('creates separate status function instances per context', () => {
+    const ctx1: StatusContext = {
+      currentJobStatus: 'Succeeded',
+      dependencyResults: {},
+      isCanceled: false,
+    };
+    const ctx2: StatusContext = {
+      currentJobStatus: 'Canceled',
+      dependencyResults: {},
+      isCanceled: true,
+    };
+    const fns1 = createStatusFunctions(ctx1);
+    const fns2 = createStatusFunctions(ctx2);
+    expect(fns1.canceled()).toBe(false);
+    expect(fns2.canceled()).toBe(true);
+  });
+});
