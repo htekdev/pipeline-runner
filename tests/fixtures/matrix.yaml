@@ -1,0 +1,41 @@
+name: "Matrix Strategy Pipeline"
+
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildMatrix
+        displayName: "Build on multiple platforms"
+        strategy:
+          matrix:
+            linux-node18:
+              nodeVersion: "18"
+              os: linux
+            linux-node20:
+              nodeVersion: "20"
+              os: linux
+            windows-node20:
+              nodeVersion: "20"
+              os: windows
+          maxParallel: 2
+        steps:
+          - pwsh: |
+              Write-Host "Building with Node $(nodeVersion) on $(os)"
+            displayName: "Build"
+
+          - node: |
+              console.log('Running tests...');
+            displayName: "Test"
+
+  - stage: Deploy
+    dependsOn: Build
+    jobs:
+      - deployment: DeployProd
+        environment: production
+        strategy:
+          canary:
+            increments: [10, 50, 100]
+            deploy:
+              steps:
+                - pwsh: |
+                    Write-Host "Deploying canary..."
+                  displayName: "Canary Deploy"

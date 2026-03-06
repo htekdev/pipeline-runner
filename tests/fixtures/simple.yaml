@@ -1,0 +1,14 @@
+name: "Simple Pipeline"
+
+steps:
+  - pwsh: |
+      Write-Host "Hello from PowerShell!"
+    displayName: "Say Hello"
+
+  - node: |
+      console.log('Hello from Node.js!');
+    displayName: "Node Hello"
+
+  - python: |
+      print("Hello from Python!")
+    displayName: "Python Hello"

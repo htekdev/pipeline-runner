@@ -1,0 +1,14 @@
+# Invalid pipeline - has both stages and jobs
+name: "Invalid Pipeline"
+
+stages:
+  - stage: Build
+    jobs:
+      - job: BuildApp
+        steps:
+          - pwsh: echo "building"
+
+jobs:
+  - job: AnotherJob
+    steps:
+      - pwsh: echo "this is invalid"
