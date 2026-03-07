@@ -51,7 +51,7 @@ Piperun is a locally executable YAML pipeline runner inspired by Azure DevOps bu
 - **`src/compiler/`** — Template expansion (`include`/`extends` with `${{ if }}`/`${{ each }}`), expression evaluation (recursive descent parser → AST → evaluator), parameter resolution with type coercion.
 - **`src/runtime/`** — Execution orchestration. `PipelineRunner` → `StageRunner` → `JobRunner` → `StepRunner`. `DependencyGraph` does topological sort (Kahn's algorithm) for stage/job ordering. `StepRunner` spawns real child processes (`pwsh`, `node`, `python`).
 - **`src/variables/`** — Scoped variable storage (pipeline → stage → job). `SecretMasker` redacts secrets from output. `OutputVariableStore` tracks `##pipeline[setvariable]` cross-step communication.
-- **`src/functions/`** — 30+ expression functions (logical, comparison, string, collection, status). Each category in its own file, registered via `createFunctionRegistry()`.
+- **`src/functions/`** — 33 expression functions (logical, comparison, string, collection, status). Each category in its own file, registered via `createFunctionRegistry()`.
 - **`src/cli/`** — Commander.js commands: `run`, `validate`, `list`, `plan`, `visualize`. Param syntax: `--param.name=value`.
 
 ### Expression system — three syntaxes

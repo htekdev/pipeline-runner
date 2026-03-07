@@ -4,14 +4,14 @@ A locally executable pipeline framework inspired by Azure DevOps YAML pipelines.
 
 **Define stages, jobs, and steps in YAML — run them on your machine with `piperun run`.**
 
-✦ Multi-language steps (pwsh · node · python) · ✦ 30 expression functions · ✦ Template system with conditionals and loops · ✦ Matrix strategy · ✦ Deployment lifecycles · ✦ Logging command protocol · ✦ Secret masking
+✦ Multi-language steps (pwsh · node · python) · ✦ 33 expression functions · ✦ Template system with conditionals and loops · ✦ Matrix strategy · ✦ Deployment lifecycles · ✦ Logging command protocol · ✦ Secret masking
 
 ---
 
 ## Features
 
 - **Multi-language steps** — `pwsh`, `node`, and `python` inline scripts, plus reusable `task` references
-- **Expression engine** — 30 built-in functions across logical, comparison, string, collection, and status categories
+- **Expression engine** — 33 built-in functions across logical, comparison, string, collection, and status categories
 - **Three expression syntaxes** — `${{ }}` compile-time, `$[ ]` runtime, `$(var)` variable macros
 - **Template system** — `include` and `extends` templates with `${{ if }}` / `${{ each }}` directives
 - **Parameters** — typed pipeline parameters (`string`, `number`, `boolean`, `object`, `step`, `stepList`, `job`, `jobList`, `stage`, `stageList`) with defaults and allowed values
@@ -522,7 +522,7 @@ resources:
 
 ## Expression Functions
 
-All 30 built-in functions, organized by category. Function names are **case-insensitive**.
+All 33 built-in functions, organized by category. Function names are **case-insensitive**.
 
 ### Logical
 
