@@ -15,18 +15,14 @@ blocking: true
 steps:
   - name: Check relative imports have .js extension
     run: |
-      FILE="${{ event.file.path }}"
-
-      # Find relative imports (from './' or from '../') that don't end with .js
-      BAD_IMPORTS=$(grep -nE "from\s+['\"]\.\.?/" "$FILE" | grep -vE "\.js['\"]" || true)
-
-      if [ -n "$BAD_IMPORTS" ]; then
-        echo "❌ Relative imports must use .js extension for ESM compatibility:"
-        echo "$BAD_IMPORTS"
-        echo ""
-        echo "Fix: Add .js extension to each import path"
-        echo "  Example: from './foo' → from './foo.js'"
+      $FILE = "${{ event.file.path }}"
+      $BAD_IMPORTS = Select-String -Path $FILE -Pattern "from\s+['""]\.\.?/" | Where-Object { $_.Line -notmatch "\.js['""]" }
+      if ($BAD_IMPORTS) {
+        Write-Host "❌ Relative imports must use .js extension for ESM compatibility:"
+        $BAD_IMPORTS | ForEach-Object { Write-Host "$($_.LineNumber): $($_.Line.Trim())" }
+        Write-Host ""
+        Write-Host "Fix: Add .js extension to each import path"
+        Write-Host "  Example: from './foo' → from './foo.js'"
         exit 1
-      fi
-
-      echo "✅ All relative imports use .js extensions"
+      }
+      Write-Host "✅ All relative imports use .js extensions"

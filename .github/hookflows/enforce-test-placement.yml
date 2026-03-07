@@ -14,18 +14,19 @@ blocking: true
 steps:
   - name: Verify test file location
     run: |
-      FILEPATH="${{ event.file.path }}"
+      $FILEPATH = "${{ event.file.path }}"
+      $NormalizedPath = $FILEPATH -replace '\\', '/'
 
       # Check that the file is under tests/ directory
-      if ! echo "$FILEPATH" | grep -qE '(^|/)tests/'; then
-        echo "❌ Test files must be under the tests/ directory"
-        echo "   File: $FILEPATH"
-        echo ""
-        echo "   Place test files in the appropriate subdirectory:"
-        echo "     tests/unit/        — isolated unit tests"
-        echo "     tests/integration/ — CLI integration tests"
-        echo "     tests/e2e/         — full pipeline execution tests"
+      if ($NormalizedPath -notmatch '(^|/)tests/') {
+        Write-Host "❌ Test files must be under the tests/ directory"
+        Write-Host "   File: $FILEPATH"
+        Write-Host ""
+        Write-Host "   Place test files in the appropriate subdirectory:"
+        Write-Host "     tests/unit/        — isolated unit tests"
+        Write-Host "     tests/integration/ — CLI integration tests"
+        Write-Host "     tests/e2e/         — full pipeline execution tests"
         exit 1
-      fi
+      }
 
-      echo "✅ Test file is in correct location"
+      Write-Host "✅ Test file is in correct location"
