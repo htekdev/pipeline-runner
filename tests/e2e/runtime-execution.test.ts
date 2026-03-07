@@ -920,6 +920,139 @@ stages:
       expect(logOutput).toContain('DeploySvc_svc1');
       expect(logOutput).toContain('DeploySvc_svc2');
     });
+
+    it('19k. dynamic matrix rejects prototype pollution in config names', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const file = await writePipeline('dynamic-matrix-proto-config.yaml', `
+name: DynamicMatrixProtoConfig
+stages:
+  - stage: Generate
+    jobs:
+      - job: Setup
+        steps:
+          - name: gen
+            pwsh: |
+              $matrix = '{"__proto__":{"x":"1"},"safe":{"x":"2"}}'
+              Write-Host "##pipeline[setvariable variable=matrix;isOutput=true]$matrix"
+      - job: Build
+        dependsOn: Setup
+        strategy:
+          matrix: "$[dependencies.Setup.outputs['gen.matrix']]"
+        steps:
+          - pwsh: Write-Host "Should not run"
+`);
+      const result = await runPipeline(file);
+      expect(result.exitCode).not.toBe(0);
+    });
+
+    it('19l. dynamic matrix rejects prototype pollution in variable keys', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const file = await writePipeline('dynamic-matrix-proto-key.yaml', `
+name: DynamicMatrixProtoKey
+stages:
+  - stage: Generate
+    jobs:
+      - job: Setup
+        steps:
+          - name: gen
+            pwsh: |
+              $matrix = '{"cfg1":{"constructor":"bad","x":"1"}}'
+              Write-Host "##pipeline[setvariable variable=matrix;isOutput=true]$matrix"
+      - job: Build
+        dependsOn: Setup
+        strategy:
+          matrix: "$[dependencies.Setup.outputs['gen.matrix']]"
+        steps:
+          - pwsh: Write-Host "Should not run"
+`);
+      const result = await runPipeline(file);
+      expect(result.exitCode).not.toBe(0);
+    });
+
+    it('19m. dynamic matrix rejects array-shaped JSON', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const file = await writePipeline('dynamic-matrix-array.yaml', `
+name: DynamicMatrixArray
+stages:
+  - stage: Generate
+    jobs:
+      - job: Setup
+        steps:
+          - name: gen
+            pwsh: |
+              Write-Host "##pipeline[setvariable variable=matrix;isOutput=true][1,2,3]"
+      - job: Build
+        dependsOn: Setup
+        strategy:
+          matrix: "$[dependencies.Setup.outputs['gen.matrix']]"
+        steps:
+          - pwsh: Write-Host "Should not run"
+`);
+      const result = await runPipeline(file);
+      expect(result.exitCode).not.toBe(0);
+    });
+
+    it('19n. dynamic matrix rejects non-object config values', { timeout: 30_000 }, async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const file = await writePipeline('dynamic-matrix-bad-config.yaml', `
+name: DynamicMatrixBadConfig
+stages:
+  - stage: Generate
+    jobs:
+      - job: Setup
+        steps:
+          - name: gen
+            pwsh: |
+              $matrix = '{"cfg1":"not-an-object"}'
+              Write-Host "##pipeline[setvariable variable=matrix;isOutput=true]$matrix"
+      - job: Build
+        dependsOn: Setup
+        strategy:
+          matrix: "$[dependencies.Setup.outputs['gen.matrix']]"
+        steps:
+          - pwsh: Write-Host "Should not run"
+`);
+      const result = await runPipeline(file);
+      expect(result.exitCode).not.toBe(0);
+    });
+
+    it('19o. matrix with Record-format job variables preserves them', { timeout: 30_000 }, async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      const file = await writePipeline('matrix-record-vars.yaml', `
+name: MatrixRecordVars
+stages:
+  - stage: Build
+    jobs:
+      - job: Compile
+        variables:
+          buildType: Release
+        strategy:
+          matrix:
+            linux:
+              os: linux
+            windows:
+              os: windows
+        steps:
+          - pwsh: Write-Host "OS=$env:OS TYPE=$env:BUILDTYPE"
+`);
+      const result = await runPipeline(file);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.status).toBe('succeeded');
+
+      const logOutput = logSpy.mock.calls.map(c => c.join(' ')).join('\n');
+      expect(logOutput).toContain('Compile_linux');
+      expect(logOutput).toContain('Compile_windows');
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
